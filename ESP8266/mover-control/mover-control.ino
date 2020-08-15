@@ -1,3 +1,6 @@
+// Caravan twin motor mover control - wired version
+// ST 2020
+
 #include <Wire.h>
 #include <Adafruit_ADS1015.h>
 Adafruit_ADS1115 ads;
