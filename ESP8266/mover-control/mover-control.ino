@@ -9,8 +9,8 @@ int16_t adc2;
 
 int ledPin = 10;
 int switchPin = 16;
-int leftPin = 10;
-int rightPin = 11;
+int leftPin = 12;
+int rightPin = 14;
 int leftDirPinFwd = 13;
 int leftDirPinBkwd = 15;
 int rightDirPinFwd = 0;
@@ -22,9 +22,13 @@ int xPosition = 0;
 int yPosition = 0;
 bool isOn = false;
 
-int r_max = 17451;
-int r_min = 0;
+int r_max = 17450;
+int r_min = 34;
+int x_mid = 0;
+int y_mid = 0;
 int deadOffset = 2;
+int offset_x = 0;
+int offset_y = 0;
 int motorValues[2] = {0,0};
 
 void setup() {
@@ -38,8 +42,14 @@ void setup() {
   pinMode(rightOnPin, OUTPUT);
 
   Serial.begin(9600);
-  Serial.println("Starting");
+  Serial.println("Starting...");
   digitalWrite(ledPin, HIGH); // TURN OFF
+  ads.begin();
+  adc1 = ads.readADC_SingleEnded(1);
+  adc2 = ads.readADC_SingleEnded(2);
+
+  x_mid = adc2;
+  y_mid = adc1;
 }
 
 void loop() {
@@ -51,6 +61,7 @@ void loop() {
     } else {
       digitalWrite(ledPin, LOW);
       Serial.println("ON - HIGH");
+      Serial.print("Offset X:"); Serial.print(offset_x); Serial.print(", Offset Y:"); Serial.println(offset_y);
     }
     isOn = !isOn;
     delay(500); // de-bounce
@@ -59,19 +70,26 @@ void loop() {
   if (isOn) {
     adc1 = ads.readADC_SingleEnded(1);
     adc2 = ads.readADC_SingleEnded(2);
+    Serial.print(adc2); Serial.print(" : "); Serial.print(adc1); Serial.print(" | ");   
+
+    xPosition = reduceRange(adc2, x_mid);
+    yPosition = reduceRange(adc1, y_mid);
+    Serial.print(xPosition); Serial.print(" : "); Serial.print(yPosition); Serial.print(" | ");   
     
-    xPosition = reduceRange(adc1); 
-    yPosition = reduceRange(adc1); 
-    //Serial.print(xPosition); Serial.print(" : "); Serial.println(yPosition);    
+//    xPosition = xPosition - center_x; 
+//    yPosition = yPosition - center_y; 
+//    Serial.print(xPosition); Serial.print(" : "); Serial.print(yPosition); Serial.print(" | ");   
 
     int left = 0;
     int right = 0;
 
+    setMotorValues(xPosition, yPosition);    
+
+    bool leftFwd = false;
+    bool rightFwd = false;
+        
     if (xPosition > deadOffset || xPosition < deadOffset*-1
       || yPosition > deadOffset || yPosition < deadOffset*-1) {
-        setMotorValues(xPosition, yPosition);    
-        bool leftFwd = false;
-        bool rightFwd = false;
         
         leftFwd = motorValues[0] > 0;
         rightFwd = motorValues[1] > 0;
@@ -99,11 +117,21 @@ void loop() {
         right = 0;
       }
 
-      Serial.print("MOTOR: "); Serial.print(motorValues[0]); Serial.print(" : "); Serial.print(motorValues[1]); 
-      Serial.print(" : "); Serial.print(left); Serial.print(" : "); Serial.println(right);  
+      Serial.print("RAW: L="); Serial.print(motorValues[0]); Serial.print(", R="); Serial.print(motorValues[1]); 
+      Serial.print(", L Dir="); Serial.print(leftFwd ? "FWD" : "BKWD");
+      Serial.print(", R Dir="); Serial.print(rightFwd ? "FWD" : "BKWD");
+      Serial.print(" ::: OUTPUT: L="); Serial.print(left); Serial.print(" : R="); Serial.print(right);  
 
-      analogWrite(leftPin, left/2);
-      analogWrite(rightPin, right/2);
+      // Scale up to (0 - 1023) range
+      left = scaleToPwm(left);
+      right = scaleToPwm(right);
+
+      Serial.print(", SCALED: L="); Serial.print(left); Serial.print(" : R="); Serial.println(right);  
+
+      analogWrite(leftPin, left);
+      analogWrite(rightPin, right);
+
+delay(100);
   }
 }
 
@@ -126,11 +154,27 @@ void direction(bool left, bool right) {
   }
 }
 
-int reduceRange(int pos) {
-  // Val from 0 - max (17451)
-  // Convert to -128 - +127
-  float s = pos-r_max/2;
-  return s/(r_max/256);  
+int scaleToPwm(int pos) {
+    //Result = ((Input - InputLow) / (InputHigh - InputLow)) * (OutputHigh - OutputLow) + OutputLow;
+    return ((float)(pos - 0) / (125 - 0)) * (1023 - 0) + 0;
+}
+
+int reduceRange(int pos, int r_mid) {
+  // Input is between r_min and r_max
+  // Needs scaling to between -128 and +127
+  // BUT...
+  // The centre isn't halfway between, so scale differently each side of the centre
+  float r;
+  if (pos > r_mid) {
+    //Result = ((Input - InputLow) / (InputHigh - InputLow)) * (OutputHigh - OutputLow) + OutputLow;
+    r = ((float)(pos-r_mid)/(r_max-r_mid)) * (127 - 0) + 0;
+  } else {
+    r = ((float)(pos-r_min)/(r_mid-r_min)) * (0 - -128) + -128;
+  }
+  
+  //Result = ((Input - InputLow) / (InputHigh - InputLow)) * (OutputHigh - OutputLow) + OutputLow;
+  
+  return round(r);
 }
 
 void setMotorValues(int nJoyX, int nJoyY) {
