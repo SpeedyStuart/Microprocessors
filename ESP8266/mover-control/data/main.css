@@ -1,0 +1,37 @@
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #F5F6F4;
+}
+
+section {
+    padding: 20px 0;
+}
+
+.joystick {
+ 
+}
+
+.button {
+    padding: 10px;
+    background-color: #fff;
+    border: 1px solid #fff;
+    border-radius:5px;
+    color:#000;
+}
+
+.button.btn-primary {
+    text-transform:uppercase;
+    min-width: 100px;
+    color:#fff;
+}
+
+.button.btn-primary.on {
+    background-color: #931621;
+    border: 1px solid #931621;
+}
+
+.button.btn-primary.off {
+    background-color: #87C09B;
+    border: 1px solid #87C09B;
+    color:#000;
+}
