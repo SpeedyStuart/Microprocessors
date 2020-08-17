@@ -31,3 +31,5 @@
 *.out
 *.app
 /.vs/Microprocessors/v16
+/ESP8266/mover_control/.vs/mover_control/v16
+/ESP8266/mover_control/Debug
