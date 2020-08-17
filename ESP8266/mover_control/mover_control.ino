@@ -39,7 +39,7 @@ int deadOffset = 2;
 int offset_x = 0;
 int offset_y = 0;
 int motorValues[2] = { 0,0 };
-bool rainbow = false;
+bool wireless = false;
 
 ESP8266WiFiMulti wifiMulti;       // Create an instance of the ESP8266WiFiMulti class, called 'wifiMulti'
 ESP8266WebServer server(80);       // Create a webserver object that listens for HTTP request on port 80
@@ -75,12 +75,19 @@ void setup() {
     x_mid = adc2;
     y_mid = adc1;
 
-    //  startWiFi();
-    //  startOTA();
-    //  startSPIFFS();
-    //  startWebSocket();
-    //  startMDNS();
-    //  startServer();
+    Serial.print(adc2); Serial.print("|"); Serial.println(adc1);
+
+    // Use wireless mode if there's no controller plugged in
+    if (adc2 < 7000 && adc1 < 7000) {
+        Serial.println("Wireless mode");
+        wireless = true;
+        startWiFi();
+        startOTA();
+        startSPIFFS();
+        startWebSocket();
+        startMDNS();
+        startServer();
+    }    
 }
 
 void switchOn() {
@@ -97,31 +104,34 @@ void switchOff() {
 
 void loop() {
 
-    //  webSocket.loop();
-    //  server.handleClient();
-    //  ArduinoOTA.handle();
-    //  
-    if (digitalRead(switchPin) == LOW) {
-        if (isOn) {
-            switchOff();
-        }
-        else {
-            switchOn();
-            Serial.print("Offset X:"); Serial.print(offset_x); Serial.print(", Offset Y:"); Serial.println(offset_y);
-        }
-        delay(500); // de-bounce
+	if (wireless) {
+		webSocket.loop();
+		server.handleClient();
+		ArduinoOTA.handle();
     }
+    else {
+        if (digitalRead(switchPin) == LOW) {
+            if (isOn) {
+                switchOff();
+            }
+            else {
+                switchOn();
+                Serial.print("Offset X:"); Serial.print(offset_x); Serial.print(", Offset Y:"); Serial.println(offset_y);
+            }
+            delay(500); // de-bounce
+        }
 
-    if (isOn) {
-        adc1 = ads.readADC_SingleEnded(1);
-        adc2 = ads.readADC_SingleEnded(2);
-        //Serial.print(adc2); Serial.print(" : "); Serial.print(adc1); Serial.print(" | ");   
+        if (isOn) {
+            adc1 = ads.readADC_SingleEnded(1);
+            adc2 = ads.readADC_SingleEnded(2);
+            //Serial.print(adc2); Serial.print(" : "); Serial.print(adc1); Serial.print(" | ");   
 
-        xPosition = reduceRange(adc2, x_mid);
-        yPosition = reduceRange(adc1, y_mid);
-        //    Serial.print(xPosition); Serial.print(" : "); Serial.print(yPosition); Serial.print(" | ");   
+            xPosition = reduceRange(adc2, x_mid);
+            yPosition = reduceRange(adc1, y_mid);
+            //    Serial.print(xPosition); Serial.print(" : "); Serial.print(yPosition); Serial.print(" | ");   
 
-        convertAndSetMotors(xPosition, yPosition);
+            convertAndSetMotors(xPosition, yPosition);
+        }
     }
 }
 
@@ -232,12 +242,10 @@ int reduceRange(int pos, int r_mid) {
     return round(r);
 }
 
-
 #define DDRIVE_MIN -127 //The minimum value x or y can be.
 #define DDRIVE_MAX 127  //The maximum value x or y can be.
 #define MOTOR_MIN_PWM -127 //The minimum value the motor output can be.
 #define MOTOR_MAX_PWM 127 //The maximum value the motor output can be.
-
 
 void setNewMotorValues(float x, float y)
 {
@@ -245,7 +253,6 @@ void setNewMotorValues(float x, float y)
     float rawRight;
     float RawLeft;
     float RawRight;
-
 
     // first Compute the angle in deg
     // First hypotenuse
@@ -299,84 +306,28 @@ void setNewMotorValues(float x, float y)
     motorValues[1] = map(rawRight, DDRIVE_MIN, DDRIVE_MAX, MOTOR_MIN_PWM, MOTOR_MAX_PWM);
 }
 
-void setMotorValues(int nJoyX, int nJoyY) {
-    // Differential Steering Joystick Algorithm
-  // ========================================
-  //   by Calvin Hass
-  //   https://www.impulseadventure.com/elec/
-  //
-  // Converts a single dual-axis joystick into a differential
-  // drive motor control, with support for both drive, turn
-  // and pivot operations.
-  //
-
-  // INPUTS
-  //int     nJoyX;              // Joystick X input                     (-128..+127)
-  //int     nJoyY;              // Joystick Y input                     (-128..+127)
-
-  // OUTPUTS
-    int     nMotMixL;           // Motor (left)  mixed output           (-128..+127)
-    int     nMotMixR;           // Motor (right) mixed output           (-128..+127)
-
-    // CONFIG
-    // - fPivYLimt  : The threshold at which the pivot action starts
-    //                This threshold is measured in units on the Y-axis
-    //                away from the X-axis (Y=0). A greater value will assign
-    //                more of the joystick's range to pivot actions.
-    //                Allowable range: (0..+127)
-    float fPivYLimit = 32.0;
-
-    // TEMP VARIABLES
-    float   nMotPremixL;    // Motor (left)  premixed output        (-128..+127)
-    float   nMotPremixR;    // Motor (right) premixed output        (-128..+127)
-    int     nPivSpeed;      // Pivot Speed                          (-128..+127)
-    float   fPivScale;      // Balance scale b/w drive and pivot    (   0..1   )
-
-
-    // Calculate Drive Turn output due to Joystick X input
-    if (nJoyY >= 0) {
-        // Forward
-        nMotPremixL = (nJoyX >= 0) ? 127.0 : (127.0 + nJoyX);
-        nMotPremixR = (nJoyX >= 0) ? (127.0 - nJoyX) : 127.0;
-    }
-    else {
-        // Reverse
-        nMotPremixL = (nJoyX >= 0) ? (127.0 - nJoyX) : 127.0;
-        nMotPremixR = (nJoyX >= 0) ? 127.0 : (127.0 + nJoyX);
-    }
-
-    // Scale Drive output due to Joystick Y input (throttle)
-    nMotPremixL = nMotPremixL * nJoyY / 128.0;
-    nMotPremixR = nMotPremixR * nJoyY / 128.0;
-
-    // Now calculate pivot amount
-    // - Strength of pivot (nPivSpeed) based on Joystick X input
-    // - Blending of pivot vs drive (fPivScale) based on Joystick Y input
-    nPivSpeed = nJoyX;
-    fPivScale = (abs(nJoyY) > fPivYLimit) ? 0.0 : (1.0 - abs(nJoyY) / fPivYLimit);
-
-    // Calculate final mix of Drive and Pivot
-    nMotMixL = (1.0 - fPivScale) * nMotPremixL + fPivScale * (nPivSpeed);
-    nMotMixR = (1.0 - fPivScale) * nMotPremixR + fPivScale * (-nPivSpeed);
-
-    motorValues[0] = nMotMixL;
-    motorValues[1] = nMotMixR;
-}
-
 void startWiFi() { // Start a Wi-Fi access point, and try to connect to some given access points. Then wait for either an AP or STA connection
     WiFi.softAP(ssid, password);             // Start the access point
     Serial.print("Access Point \"");
     Serial.print(ssid);
     Serial.println("\" started\r\n");
 
-    //wifiMulti.addAP("Skynet", "MollyCat2015");   // add Wi-Fi networks you want to connect to
-
-
     Serial.println("Connecting");
+    bool ledOn = false;
     while (wifiMulti.run() != WL_CONNECTED && WiFi.softAPgetStationNum() < 1) {  // Wait for the Wi-Fi to connect
         delay(250);
         Serial.print('.');
+        // Flash the built in led while waiting
+        if (ledOn) {
+            digitalWrite(LED_BUILTIN, LOW);
+        }
+        else {
+            digitalWrite(LED_BUILTIN, HIGH);
+        }
+        ledOn = !ledOn;
     }
+    digitalWrite(LED_BUILTIN, LOW);
+
     Serial.println("\r\n");
     if (WiFi.softAPgetStationNum() == 0) {      // If the ESP is connected to an AP
         Serial.print("Connected to ");
