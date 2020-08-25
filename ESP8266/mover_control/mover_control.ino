@@ -9,6 +9,7 @@
 #include <ESP8266mDNS.h>
 #include <FS.h>
 #include <WebSocketsServer.h>
+#include <ArduinoSort.h>
 
 #include <Wire.h>
 #include <Adafruit_ADS1015.h>
@@ -51,7 +52,7 @@ const char* password = "thereisnospoon";   // The password required to connect t
 
 const char* OTAName = "ESP8266";           // A name and a password for the OTA service
 const char* OTAPassword = "esp8266";
-const char* mdnsName = "esp8266"; // Domain name for the mDNS responder
+const char* mdnsName = "conqueror"; // Domain name for the mDNS responder
 
 void setup() {
     pinMode(ledPin, OUTPUT);
@@ -69,16 +70,18 @@ void setup() {
     Serial.println("Starting...");
     digitalWrite(ledPin, HIGH); // TURN OFF
     ads.begin();
-    adc1 = ads.readADC_SingleEnded(1);
-    adc2 = ads.readADC_SingleEnded(2);
+    adc1 = getAdcAvg(1);
+    adc2 = getAdcAvg(2);
 
     x_mid = adc2;
     y_mid = adc1;
 
+bool forceWireless = true;
+
     Serial.print(adc2); Serial.print("|"); Serial.println(adc1);
 
     // Use wireless mode if there's no controller plugged in
-    if (adc2 < 7000 && adc1 < 7000) {
+    if (adc2==-1 || adc2==-1 || forceWireless) {
         Serial.println("Wireless mode");
         wireless = true;
         startWiFi();
@@ -87,7 +90,9 @@ void setup() {
         startWebSocket();
         startMDNS();
         startServer();
-    }    
+    } else {
+      Serial.println("Wired mode");
+    }
 }
 
 void switchOn() {
@@ -122,15 +127,21 @@ void loop() {
         }
 
         if (isOn) {
-            adc1 = ads.readADC_SingleEnded(1);
-            adc2 = ads.readADC_SingleEnded(2);
+            adc1 = getAdcAvg(1);
+            adc2 = getAdcAvg(2);
             //Serial.print(adc2); Serial.print(" : "); Serial.print(adc1); Serial.print(" | ");   
 
-            xPosition = reduceRange(adc2, x_mid);
-            yPosition = reduceRange(adc1, y_mid);
-            //    Serial.print(xPosition); Serial.print(" : "); Serial.print(yPosition); Serial.print(" | ");   
-
-            convertAndSetMotors(xPosition, yPosition);
+            // Handle wire being unplugged
+            if (adc1 == -1 || adc2 == -1) {
+                analogWrite(leftPin, 0);
+                analogWrite(rightPin, 0);
+            }
+            else {
+                xPosition = reduceRange(adc2, x_mid);
+                yPosition = reduceRange(adc1, y_mid);
+                //    Serial.print(xPosition); Serial.print(" : "); Serial.print(yPosition); Serial.print(" | ");   
+                convertAndSetMotors(xPosition, yPosition);
+            }
         }
     }
 }
@@ -178,14 +189,14 @@ void convertAndSetMotors(int x, int y) {
         right = 0;
     }
 
-    Serial.print(" ,LDir="); Serial.print(leftFwd ? "F" : "B"); Serial.print(", RDir="); Serial.print(rightFwd ? "F" : "B");
     Serial.print(" : OUTPUT: L="); Serial.print(left); Serial.print(", R="); Serial.print(right);
 
     // Scale up to (0 - 1023) range
     left = scaleToPwm(left);
     right = scaleToPwm(right);
 
-    Serial.print(", SCALED: L="); Serial.print(left); Serial.print(" : R="); Serial.println(right);
+    Serial.print(", SCALED: L="); Serial.print(left); Serial.print(leftFwd ? "F" : "B"); Serial.print(" : R="); Serial.print(right);
+    Serial.println(rightFwd ? "F" : "B");
 
     analogWrite(leftPin, left);
     analogWrite(rightPin, right);
@@ -220,7 +231,10 @@ int scaleFromWeb(int pos) {
 
 int scaleToPwm(int pos) {
     //Result = ((Input - InputLow) / (InputHigh - InputLow)) * (OutputHigh - OutputLow) + OutputLow;
-    return ((float)(pos - 0) / (127 - 0)) * (1023 - 0) + 0;
+    // Imput is 0 - 127, Output is 0 - 1023
+    // We change scale as the motors need at least 400 to start moving, but we clip under 20 so there's a 'stop'
+    if (pos < 20) return 0;
+    return ((float)(pos - 0) / (127 - 0)) * (1023 - 400) + 400;
 }
 
 int reduceRange(int pos, int r_mid) {
@@ -242,7 +256,7 @@ int reduceRange(int pos, int r_mid) {
     return round(r);
 }
 
-#define DDRIVE_MIN -127 //The minimum value x or y can be.
+#define DDRIVE_MIN -128 //The minimum value x or y can be.
 #define DDRIVE_MAX 127  //The maximum value x or y can be.
 #define MOTOR_MIN_PWM -127 //The minimum value the motor output can be.
 #define MOTOR_MAX_PWM 127 //The maximum value the motor output can be.
@@ -251,8 +265,6 @@ void setNewMotorValues(float x, float y)
 {
     float rawLeft;
     float rawRight;
-    float RawLeft;
-    float RawRight;
 
     // first Compute the angle in deg
     // First hypotenuse
@@ -261,7 +273,7 @@ void setNewMotorValues(float x, float y)
     // angle in radians
     float rad = acos(abs(x) / z);
 
-    // Cataer for NaN values
+    // Cater for NaN values
     if (isnan(rad) == true) {
         rad = 0;
     }
@@ -269,14 +281,18 @@ void setNewMotorValues(float x, float y)
     // and in degrees
     float angle = rad * 180 / PI;
 
+    Serial.print("A="); Serial.print(angle);
+  
     // Now angle indicates the measure of turn
      // Along a straight line, with an angle o, the turn co-efficient is same
      // this applies for angles between 0-90, with angle 0 the co-eff is -1
      // with angle 45, the co-efficient is 0 and with angle 90, it is 1
 
     float tcoeff = -1 + (angle / 90) * 2;
+
+    Serial.print(" C="); Serial.print(tcoeff); 
     float turn = tcoeff * abs(abs(y) - abs(x));
-    turn = round(turn * 100) / 100;
+    Serial.print(" TURN="); + Serial.print(turn);
 
     // And max of y or x is the movement
     float mov = max(abs(y), abs(x));
@@ -297,13 +313,9 @@ void setNewMotorValues(float x, float y)
         rawRight = 0 - rawRight;
     }
 
-    // Update the values
-    RawLeft = rawLeft;
-    RawRight = rawRight;
-
     // Map the values onto the defined rang
-    motorValues[0] = map(rawLeft, DDRIVE_MIN, DDRIVE_MAX, MOTOR_MIN_PWM, MOTOR_MAX_PWM);
-    motorValues[1] = map(rawRight, DDRIVE_MIN, DDRIVE_MAX, MOTOR_MIN_PWM, MOTOR_MAX_PWM);
+    motorValues[0] = rawLeft;// map(rawLeft, DDRIVE_MIN, DDRIVE_MAX, MOTOR_MIN_PWM, MOTOR_MAX_PWM);
+    motorValues[1] = rawRight; //map(rawRight, DDRIVE_MIN, DDRIVE_MAX, MOTOR_MIN_PWM, MOTOR_MAX_PWM);
 }
 
 void startWiFi() { // Start a Wi-Fi access point, and try to connect to some given access points. Then wait for either an AP or STA connection
@@ -312,6 +324,8 @@ void startWiFi() { // Start a Wi-Fi access point, and try to connect to some giv
     Serial.print(ssid);
     Serial.println("\" started\r\n");
 
+   // wifiMulti.addAP("Skynet", "[PASSWORD]");
+    
     Serial.println("Connecting");
     bool ledOn = false;
     while (wifiMulti.run() != WL_CONNECTED && WiFi.softAPgetStationNum() < 1) {  // Wait for the Wi-Fi to connect
@@ -477,7 +491,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t len) { 
         if (payload[0] == '0') {
             switchOff();
         }
-        else if (payload[0] == '1') {                      // the browser sends an R when the rainbow effect is enabled
+        else if (payload[0] == '1') {                     
             switchOn();
             // Do move
             // Split input
@@ -518,4 +532,24 @@ String getContentType(String filename) { // determine the filetype of a given fi
     else if (filename.endsWith(".ico")) return "image/x-icon";
     else if (filename.endsWith(".gz")) return "application/x-gzip";
     return "text/plain";
+}
+
+// Get the avg Analog value - ignoring outliers and returning -1 if we're floating
+int getAdcAvg(int _channel) {
+    int vals[5];
+    for (int i = 0; i < 5; i++) {
+        vals[i] = ads.readADC_SingleEnded(_channel);
+    }
+
+    sortArray(vals, 5);
+    float avg = (vals[1] + vals[2] + vals[3]) / 3; // We ignore biggest and smallest
+
+    float avgUpper = avg + 100;
+    float avgLower = avg - 100;
+    for (int i = 1; i < 4; i++) {
+        if (vals[i] > avgUpper || vals[i] < avgLower)
+            return -1;
+    }
+
+    return (int)avg;
 }
